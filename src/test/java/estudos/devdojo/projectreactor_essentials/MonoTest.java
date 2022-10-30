@@ -23,7 +23,7 @@ import reactor.test.StepVerifier;
         3. There is an error (onError) -> Subscriber and Subscription are cancelled
  */
 @Slf4j
-public class MonoTest {
+class MonoTest {
 
     private final String name = "Guilherme";
     
@@ -107,5 +107,47 @@ public class MonoTest {
                 .expectNext(name.toUpperCase())
                 .verifyComplete();
     }
+
+    @Test
+    void mono_doOnMethods() {
+        Mono<String> mono = Mono.just(name)
+                .log()
+                .doOnSubscribe(subscription -> log.info("Subscribed"))
+                .doOnRequest(value -> log.info("Request: {}", value))
+                .doOnNext(stringConsumer -> log.info("Actual value: {}", stringConsumer))
+                .doOnSuccess(stringConsumer -> log.info("Success!"));
+
+        StepVerifier.create(mono)
+                .expectNext(name)
+                .verifyComplete();
+    }
+    @Test
+    void mono_doOnErrors() {
+        Mono<Object> error = Mono.error(new IllegalArgumentException())
+                .log()
+                .doOnError(throwable -> log.info("Error message: {}", throwable.getMessage()))
+                .doOnNext(consumer -> log.info("on next: {}", consumer));
+
+        StepVerifier.create(error)
+                .expectError(IllegalArgumentException.class)
+                .verify();
+    }
+
+    @Test
+    void mono_doOnErrors_Resume() {
+        Mono<Object> error = Mono.error(new IllegalArgumentException())
+                .log()
+                .doOnError(throwable -> log.info("Error message: {}", throwable.getMessage()))
+                .onErrorReturn("EMPTY")
+                .onErrorResume(throwable -> { // If onErrorResume is before onErrorReturn, then onErrorResume is the priority, vice-versa
+                    log.info("Error: {}", throwable.getMessage());
+                    return Mono.just(name.substring(0, 3));
+                });
+        
+        StepVerifier.create(error)
+                .expectNext("EMPTY")
+                .verifyComplete();
+    }
+    
 
 }
