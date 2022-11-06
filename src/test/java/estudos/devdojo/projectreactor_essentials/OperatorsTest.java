@@ -1,7 +1,9 @@
 package estudos.devdojo.projectreactor_essentials;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import reactor.blockhound.BlockHound;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -18,6 +20,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Slf4j
 class OperatorsTest {
+
+    @BeforeAll
+    static void beforeAll() {
+        BlockHound.install();
+    }
 
     @Test
     void subscribeOnSingle() {
@@ -247,6 +254,155 @@ class OperatorsTest {
         StepVerifier.create(merge)
                 .expectNext("a", "b", "c", "d")
                 .expectComplete();
+    }
+
+    @Test
+    void mergeSequentialOperator() {
+        Flux<String> flux1 = Flux.just("a", "b");
+        Flux<String> flux2 = Flux.just("c", "d");
+
+        Flux<String> merge = Flux.mergeSequential(flux1, flux2, flux1)
+                .log();
+
+        merge.subscribe(log::info);
+
+        StepVerifier.create(merge)
+                .expectNext("a", "b", "c", "d", "a", "b")
+                .expectComplete();
+    }
+
+    @Test
+    void concatOperatorWithError() {
+        Flux<String> flux1 = Flux.just("a", "b")
+                .map(s -> {
+                    if (s.equals("b")) {
+                        throw new RuntimeException("Runtime error");
+                    }
+                    return s;
+                });
+        Flux<String> flux2 = Flux.just("c", "d");
+
+        Flux<String> fluxConcat = Flux.concatDelayError(flux1, flux2) // Continues concat if an error occurs and throw error at end
+                .log();
+
+        StepVerifier.create(fluxConcat)
+                .expectNext("a", "c", "d")
+                .expectError()
+                .verify();
+    }
+
+    @Test
+    void mergeOperatorWithError() {
+        Flux<String> flux1 = Flux.just("a", "b")
+                .map(s -> {
+                    if (s.equals("b")) {
+                        throw new RuntimeException("Runtime error");
+                    }
+                    return s;
+                })
+                .doOnError(throwable -> {
+                    log.info("Some random error occurred");
+                });
+        Flux<String> flux2 = Flux.just("c", "d");
+
+        Flux<String> fluxMerge = Flux.mergeDelayError(1, flux1, flux2, flux1) // prefetch
+                .log();
+
+        StepVerifier.create(fluxMerge)
+                .expectNext("a", "c", "d", "a")
+                .expectError()
+                .verify();
+    }
+    
+    @Test
+    void flatMapOperator() throws Exception {
+        Flux<String> flux = Flux.just("a", "b");
+
+//        Flux<Flux<String>> fluxFlux = flux.map(String::toUpperCase)
+//                .map(this::findByName)
+//                .log();
+
+        Flux<String> fluxString = flux.map(String::toUpperCase)
+                .flatMap(this::findByName) // flatMap is async, don't preserve order
+                .log();
+
+        fluxString.subscribe(stringFlux -> log.info("{}", stringFlux));
+        
+        Thread.sleep(500L);
+        
+        StepVerifier.create(fluxString)
+                .expectNext("nameB1", "nameB2", "nameA1", "nameA2")
+                .verifyComplete();
+    }
+
+    @Test
+    void flatMapSequentialOperator() throws Exception {
+        Flux<String> flux = Flux.just("a", "b");
+
+//        Flux<Flux<String>> fluxFlux = flux.map(String::toUpperCase)
+//                .map(this::findByName)
+//                .log();
+
+        Flux<String> fluxString = flux.map(String::toUpperCase)
+                .flatMapSequential(this::findByName) // Maintain order
+                .log();
+
+        fluxString.subscribe(stringFlux -> log.info("{}", stringFlux));
+
+        Thread.sleep(500L);
+
+        StepVerifier.create(fluxString)
+                .expectNext("nameA1", "nameA2", "nameB1", "nameB2")
+                .verifyComplete();
+    }
+    
+    @Test
+    void zipOperator() {
+        Flux<String> titleFlux = Flux.just("Grand Blue", "Baki");
+        Flux<String> studioFlux = Flux.just("Zero-G", "TMS Entertainment");
+        Flux<Integer> episodesFlux = Flux.just(12, 24);
+
+        Flux<Anime> animeFlux = Flux.zip(titleFlux, studioFlux, episodesFlux)
+                .log()
+                .flatMap(objects -> Flux.just(new Anime(objects.getT1(), objects.getT2(), objects.getT3())));
+        
+        animeFlux.subscribe(anime -> log.info("{}", anime));
+        
+        StepVerifier.create(animeFlux)
+                .expectNext(new Anime("Grand Blue", "Zero-G", 12))
+                .expectNext(new Anime("Baki", "TMS Entertainment", 24))
+                .verifyComplete();
+    }
+
+    @Test
+    void zipWithOperator() {
+        Flux<String> titleFlux = Flux.just("Grand Blue", "Baki");
+        Flux<String> studioFlux = Flux.just("Zero-G", "TMS Entertainment");
+        Flux<Integer> episodesFlux = Flux.just(12, 24);
+
+        Flux<Anime> animeFlux = titleFlux.zipWith(episodesFlux)
+                .log()
+                .flatMap(objects -> Flux.just(new Anime(objects.getT1(), null, objects.getT2())));
+
+        animeFlux.subscribe(anime -> log.info("{}", anime));
+
+        StepVerifier.create(animeFlux)
+                .expectNext(new Anime("Grand Blue", null, 12))
+                .expectNext(new Anime("Baki", null, 24))
+                .verifyComplete();
+    }
+    
+    private record Anime(String name, String studio, Integer episodes) {
+        @Override
+        public String toString() {
+            return String.format("{ name: %s, studio: %s, episodes: %d }", name, studio, episodes);
+        }
+    }
+    
+    private Flux<String> findByName(String name) {
+        return name.equals("A")
+                ? Flux.just("nameA1", "nameA2").delayElements(Duration.ofMillis(200L))
+                : Flux.just("nameB1", "nameB2");
     }
 
 }

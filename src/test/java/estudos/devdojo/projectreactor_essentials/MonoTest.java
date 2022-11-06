@@ -1,10 +1,19 @@
 package estudos.devdojo.projectreactor_essentials;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.reactivestreams.Subscription;
+import reactor.blockhound.BlockHound;
+import reactor.blockhound.BlockingOperationError;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
+
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 
 /*
     Reactive Streams
@@ -26,6 +35,27 @@ import reactor.test.StepVerifier;
 class MonoTest {
 
     private final String name = "Guilherme";
+    
+   @BeforeAll
+   static void beforeAll() {
+       BlockHound.install();
+   }
+
+    @Test
+    void blockHoundWorks() throws Exception {
+        try {
+            FutureTask<?> task = new FutureTask<>(() -> {
+                Thread.sleep(0);
+                return "";
+            });
+            Schedulers.parallel().schedule(task);
+
+            task.get(10, TimeUnit.SECONDS);
+            Assertions.fail("should fail");
+        } catch (ExecutionException e) {
+            Assertions.assertTrue(e.getCause() instanceof BlockingOperationError, "detected");
+        }
+    }
     
     @Test
     void shouldSubscribeToMono() {
